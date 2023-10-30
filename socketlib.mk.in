@@ -3,7 +3,5 @@ socketlib_srcs = \
 
 socketlib_install_shared_lib = yes
 
-socketlib_install_pcs = yes
-
 socketlib_install_hdrs = \
 	socketlib.h \
