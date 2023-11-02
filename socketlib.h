@@ -10,6 +10,8 @@ typedef uint16_t func_id_t;
 
 void init_server(const uint32_t port);
 void init_client(const uint32_t port);
+void init_server_file(const std::string socket_path);
+void init_client_file(const std::string socket_path);
 
 int socket_receive(const func_id_t func_id, const bool blocking, std::vector<char> &dest_buf);
 

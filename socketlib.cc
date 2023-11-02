@@ -4,9 +4,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <arpa/inet.h>
 #include <iostream>
-#include "socket_lib.h"
+#include "socketlib.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <cstring>
@@ -43,6 +44,34 @@ void init_server(const uint32_t port) {
   // TODO: re-accept once client dropped
 }
 
+void init_server_file(const std::string socket_path) {
+  struct sockaddr_un addr;
+  server_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (server_socket == -1) {
+      perror("socket");
+      exit(EXIT_FAILURE);
+  }
+  unlink(socket_path.c_str());
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  if (bind(server_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+      perror("bind");
+      close(server_socket);
+      exit(EXIT_FAILURE);
+  }
+  if (listen(server_socket, 5) == -1) {
+      perror("listen");
+      close(server_socket);
+      exit(EXIT_FAILURE);
+  }
+  std::cout << "Listening on file " << socket_path << std::endl;
+  fcntl(server_socket, F_SETFL, O_NONBLOCK);
+
+  while ((new_socket = accept(server_socket, NULL, NULL)) == -1) {}
+  std::cout << "Connection accepted" << std::endl;
+}
+
 void init_client(const uint32_t port) {
   struct sockaddr_in server_addr;
   new_socket = socket(PF_INET, SOCK_STREAM, 0);
@@ -52,6 +81,25 @@ void init_client(const uint32_t port) {
 
   if (connect(new_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) == 0) {
     std::cout << "Connected to port " << port << std::endl;
+    fcntl(new_socket, F_SETFL, O_NONBLOCK);
+  } else {
+    std::cerr << "Failed to connect." << std::endl;
+    exit(1);
+  }
+}
+
+void init_client_file(const std::string socket_path) {
+  struct sockaddr_un addr;
+  new_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (new_socket == -1) {
+    std::cerr << "Failed to connect." << std::endl;
+    exit(1);
+  }
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  if (connect(new_socket, (struct sockaddr *) &addr, sizeof(addr)) == 0) {
+    std::cout << "Connected to file " << socket_path << std::endl;
     fcntl(new_socket, F_SETFL, O_NONBLOCK);
   } else {
     std::cerr << "Failed to connect." << std::endl;
@@ -99,6 +147,7 @@ int socket_receive(const func_id_t func_id, const bool blocking, std::vector<cha
   // if not found, fetch from socket
   // if blocking, fetch & check in a loop
   bool found = false;
+  dest_buf.clear();
   if (blocking) std::cout << "DEBUG: trying to find packet with id " << func_id << std::endl;
   do {
     fetch_packets();
