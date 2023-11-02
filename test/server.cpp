@@ -23,7 +23,8 @@ int main() {
   tosend_args.addr = 0x8badf00dU;
   tosend_args.size = 0x12345678U;
 
-  init_server(6969);
+  // init_server(6969);
+  init_server_file("test.socket");
   std::vector<char> args_buf;
   args_buf = serialize_args(tosend_args);
   std::vector<char> buf;

@@ -20,7 +20,8 @@ void printVectorInHex(const std::vector<char>& buf) {
 }
 
 int main() {
-  init_client(6969);
+  // init_client(6969);
+  init_client_file("test.socket");
   std::vector<char> buf;
   while (true) {
     sleep(1);
@@ -28,6 +29,7 @@ int main() {
       struct test_args args;
       deserialize_args(buf, args);
       std::cout << "addr=0x" << std::hex << args.addr << ", size=0x" << args.size << std::endl;
+      std::cout << buf.size() << std::endl;
       printVectorInHex(buf);
     }
     if (socket_receive(420, false, buf)) {
