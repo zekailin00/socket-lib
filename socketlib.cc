@@ -44,17 +44,17 @@ void init_server(const uint32_t port) {
   // TODO: re-accept once client dropped
 }
 
-void init_server_file(const std::string socket_path) {
+void init_server_file(const char *socket_path) {
   struct sockaddr_un addr;
   server_socket = socket(AF_UNIX, SOCK_STREAM, 0);
   if (server_socket == -1) {
       perror("socket");
       exit(EXIT_FAILURE);
   }
-  unlink(socket_path.c_str());
+  unlink(socket_path);
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
   if (bind(server_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       perror("bind");
       close(server_socket);
@@ -88,7 +88,7 @@ void init_client(const uint32_t port) {
   }
 }
 
-void init_client_file(const std::string socket_path) {
+void init_client_file(const char *socket_path) {
   struct sockaddr_un addr;
   new_socket = socket(AF_UNIX, SOCK_STREAM, 0);
   if (new_socket == -1) {
@@ -97,7 +97,7 @@ void init_client_file(const std::string socket_path) {
   }
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
   if (connect(new_socket, (struct sockaddr *) &addr, sizeof(addr)) == 0) {
     std::cout << "Connected to file " << socket_path << std::endl;
     fcntl(new_socket, F_SETFL, O_NONBLOCK);
