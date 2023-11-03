@@ -66,9 +66,14 @@ void init_server_file(const char *socket_path) {
       exit(EXIT_FAILURE);
   }
   std::cout << "Listening on file " << socket_path << std::endl;
-  fcntl(server_socket, F_SETFL, O_NONBLOCK);
+  // fcntl(server_socket, F_SETFL, O_NONBLOCK);
 
-  while ((new_socket = accept(server_socket, NULL, NULL)) == -1) {}
+  while ((new_socket = accept(server_socket, NULL, NULL)) == -1) {
+      perror("accept");
+      close(server_socket);
+      exit(EXIT_FAILURE);
+  }
+  fcntl(new_socket, F_SETFL, O_NONBLOCK);
   std::cout << "Connection accepted" << std::endl;
 }
 
@@ -111,7 +116,9 @@ std::deque<message_packet_t> received_packets;
 void fetch_packets() {
   message_header_t header;
   while (recv(new_socket, &header, sizeof(header), MSG_PEEK | MSG_DONTWAIT) > 0) { // more data to come
+#ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: new data is arriving" << std::endl;
+#endif
     ssize_t header_bytes_received = recv(new_socket, &header, sizeof(message_header_t), 0);
     if (header_bytes_received != sizeof(message_header_t)) {
       // TODO: maybe put this in a loop to ensure we receive the header
@@ -122,7 +129,9 @@ void fetch_packets() {
       std::cerr << "Error allocating memory for message data" << std::endl;
       exit(-1);
     }
+#ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: start receiving message with size " << header.size << std::endl;
+#endif
     size_t bytes_received = 0;
     while (bytes_received < header.size - sizeof(message_header_t)) {
         size_t chunk_size = std::min(1024ul, header.size - sizeof(message_header_t) - bytes_received);
@@ -134,7 +143,9 @@ void fetch_packets() {
         }
         bytes_received += chunk_bytes_received;
     }
+#ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: added packet with func id " << header.func_id << std::endl;
+#endif
     message_packet_t new_packet;
     new_packet.header = header;
     new_packet.payload = message_data;
@@ -148,11 +159,15 @@ int socket_receive(const func_id_t func_id, const bool blocking, std::vector<cha
   // if blocking, fetch & check in a loop
   bool found = false;
   dest_buf.clear();
+#ifdef SOCKETLIB_VERBOSE
   if (blocking) std::cout << "DEBUG: trying to find packet with id " << func_id << std::endl;
+#endif
   do {
     fetch_packets();
     for (auto it = received_packets.begin(); it != received_packets.end(); ++it) {
+#ifdef SOCKETLIB_VERBOSE
       if (blocking) std::cout << "DEBUG: examining packet with id " << it->header.func_id << std::endl;
+#endif
       if (it->header.func_id == func_id) {  // TODO: do we check for endpoint ID?
          found = true;
          dest_buf.insert(dest_buf.end(), it->payload, it->payload + it->header.size - sizeof(message_header_t));
@@ -181,7 +196,9 @@ int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const 
     size_t chunk_size = std::min(1024ul, out_buf.size() - i);
     const char* data_ptr = out_buf.data() + i;
     ssize_t bytes_sent = send(new_socket, data_ptr, chunk_size, 0);
-	std::cout << "DEBUG: sent " << bytes_sent << " bytes" << std::endl;
+#ifdef SOCKETLIB_VERBOSE
+    std::cout << "DEBUG: sent " << bytes_sent << " bytes" << std::endl;
+#endif
     if (bytes_sent == -1) {
       return -1;
     }
