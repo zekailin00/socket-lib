@@ -192,14 +192,16 @@ int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const 
   out_buf.insert(out_buf.begin() + sizeof(message_header_t), args.begin(), args.end());
   out_buf.insert(out_buf.begin() + sizeof(message_header_t) + args.size(), payload.begin(), payload.end());
 
-  for (size_t i = 0; i < out_buf.size(); i += 1024) {
+  for (size_t i = 0; i < out_buf.size();) {
     size_t chunk_size = std::min(1024ul, out_buf.size() - i);
     const char* data_ptr = out_buf.data() + i;
     ssize_t bytes_sent = send(new_socket, data_ptr, chunk_size, 0);
 #ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: sent " << bytes_sent << " bytes" << std::endl;
 #endif
+    i += bytes_sent;
     if (bytes_sent == -1) {
+      std::cout << "DEBUG: failed to send everything" << std::endl;
       return -1;
     }
   }
