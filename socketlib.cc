@@ -13,6 +13,8 @@
 #include <cstring>
 #include <algorithm>
 
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 int server_socket, new_socket;
 
 void init_server(const uint32_t port) {
@@ -73,11 +75,17 @@ void init_server_file(const char *socket_path) {
       close(server_socket);
       exit(EXIT_FAILURE);
   }
-  fcntl(new_socket, F_SETFL, O_NONBLOCK);
+  uint8_t endpoint_req;
+  recv(new_socket, &endpoint_req, 1, 0);
+  // fcntl(new_socket, F_SETFL, O_NONBLOCK);
   std::cout << "Connection accepted" << std::endl;
 }
 
 void init_client(const uint32_t port) {
+  init_client(port, NOSERV);
+}
+
+void init_client(const uint32_t port, const endpoint_id_t endpoint_id) {
   struct sockaddr_in server_addr;
   new_socket = socket(PF_INET, SOCK_STREAM, 0);
   server_addr.sin_family = AF_INET;
@@ -86,7 +94,12 @@ void init_client(const uint32_t port) {
 
   if (connect(new_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) == 0) {
     std::cout << "Connected to port " << port << std::endl;
-    fcntl(new_socket, F_SETFL, O_NONBLOCK);
+    if ((endpoint_id != NOSERV) && (send(new_socket, &endpoint_id, sizeof(endpoint_id_t), 0) < 0)) {
+      close(new_socket);
+      std::cerr << "Failed to register endpoint ID." << std::endl;
+      exit(1);
+    }
+    // fcntl(new_socket, F_SETFL, O_NONBLOCK);
   } else {
     std::cerr << "Failed to connect." << std::endl;
     exit(1);
@@ -94,6 +107,10 @@ void init_client(const uint32_t port) {
 }
 
 void init_client_file(const char *socket_path) {
+  init_client_file(socket_path, NOSERV);
+}
+
+void init_client_file(const char *socket_path, const endpoint_id_t endpoint_id) {
   struct sockaddr_un addr;
   new_socket = socket(AF_UNIX, SOCK_STREAM, 0);
   if (new_socket == -1) {
@@ -105,7 +122,12 @@ void init_client_file(const char *socket_path) {
   strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
   if (connect(new_socket, (struct sockaddr *) &addr, sizeof(addr)) == 0) {
     std::cout << "Connected to file " << socket_path << std::endl;
-    fcntl(new_socket, F_SETFL, O_NONBLOCK);
+    if ((endpoint_id != NOSERV) && (send(new_socket, &endpoint_id, sizeof(endpoint_id_t), 0) < 0)) {
+      close(new_socket);
+      std::cerr << "Failed to register endpoint ID." << std::endl;
+      exit(1);
+    }
+    // fcntl(new_socket, F_SETFL, O_NONBLOCK);
   } else {
     std::cerr << "Failed to connect." << std::endl;
     exit(1);
@@ -119,6 +141,7 @@ void fetch_packets() {
 #ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: new data is arriving" << std::endl;
 #endif
+    // fcntl(new_socket, F_SETFL, 0);
     ssize_t header_bytes_received = recv(new_socket, &header, sizeof(message_header_t), 0);
     if (header_bytes_received != sizeof(message_header_t)) {
       // TODO: maybe put this in a loop to ensure we receive the header
@@ -134,15 +157,15 @@ void fetch_packets() {
 #endif
     size_t bytes_received = 0;
     while (bytes_received < header.size - sizeof(message_header_t)) {
-        size_t chunk_size = std::min(1024ul, header.size - sizeof(message_header_t) - bytes_received);
+        size_t chunk_size = MIN(1024ul, header.size - sizeof(message_header_t) - bytes_received);
         ssize_t chunk_bytes_received = recv(new_socket, message_data + bytes_received, chunk_size, 0);
         if (chunk_bytes_received == -1) {
-            continue;
-            std::cerr << "Error receiving message data: " << strerror(errno) << std::endl;
-            exit(-1);
+          std::cerr << "Error receiving message data: " << errno << " " << strerror(errno) << std::endl;
+          exit(-1);
         }
         bytes_received += chunk_bytes_received;
     }
+    // fcntl(new_socket, F_SETFL, O_NONBLOCK);
 #ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: added packet with func id " << header.func_id << std::endl;
 #endif
@@ -158,43 +181,64 @@ int socket_receive(const func_id_t func_id, const bool blocking, std::vector<cha
   // if not found, fetch from socket
   // if blocking, fetch & check in a loop
   bool found = false;
+  endpoint_id_t src_id = 0;
   dest_buf.clear();
+  if (blocking) {
 #ifdef SOCKETLIB_VERBOSE
-  if (blocking) std::cout << "DEBUG: trying to find packet with id " << func_id << std::endl;
+    std::cout << "DEBUG: trying to find packet with id " << func_id << std::endl;
 #endif
-  do {
-    fetch_packets();
-    for (auto it = received_packets.begin(); it != received_packets.end(); ++it) {
+    do {
+      fetch_packets();
+      for (auto it = received_packets.begin(); it != received_packets.end(); ++it) {
 #ifdef SOCKETLIB_VERBOSE
       if (blocking) std::cout << "DEBUG: examining packet with id " << it->header.func_id << std::endl;
 #endif
-      if (it->header.func_id == func_id) {  // TODO: do we check for endpoint ID?
-         found = true;
+        if (it->header.func_id == func_id) {
+           found = true;
+           src_id = it->header.src_id;
+           dest_buf.insert(dest_buf.end(), it->payload, it->payload + it->header.size - sizeof(message_header_t));
+           free(it->payload);
+           received_packets.erase(it);
+           break;
+        }
+      }
+    } while (blocking && !found);
+  } else {
+    if (received_packets.size() == 0) fetch_packets();
+    if (received_packets.size() > 0) {
+      auto it = received_packets.begin();
+      if (it->header.func_id == func_id) {
+         src_id = it->header.src_id;
          dest_buf.insert(dest_buf.end(), it->payload, it->payload + it->header.size - sizeof(message_header_t));
          free(it->payload);
-         received_packets.erase(it);
-         break;
+         received_packets.pop_front();
       }
     }
-  } while (blocking && !found);
-  return (int) found;
+  }
+  return (int) src_id;
 }
 
 int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const std::vector<char> &args, const std::vector<char> &payload) {
   message_header_t header;
   header.size = sizeof(message_header_t) + args.size() + payload.size();
-  header.endpoint_id = endpoint_id;
+  header.src_id = NOSERV; // will be overriden by server
+  header.dst_id = endpoint_id;
   header.func_id = func_id;
 
-  std::vector<char> out_buf;
-  out_buf.reserve(sizeof(message_header_t) + args.size() + payload.size());
-  out_buf.insert(out_buf.begin(), reinterpret_cast<const char*>(&header), reinterpret_cast<const char*>(&header) + sizeof(message_header_t));
-  out_buf.insert(out_buf.begin() + sizeof(message_header_t), args.begin(), args.end());
-  out_buf.insert(out_buf.begin() + sizeof(message_header_t) + args.size(), payload.begin(), payload.end());
+  // fcntl(new_socket, F_SETFL, 0);
+  if ((size_t) send(new_socket, &header, sizeof(header), 0) != sizeof(header)) {
+    std::cout << "DEBUG: failed to send header" << std::endl;
+    return -1;
+  }
 
-  for (size_t i = 0; i < out_buf.size();) {
-    size_t chunk_size = std::min(1024ul, out_buf.size() - i);
-    const char* data_ptr = out_buf.data() + i;
+  if ((size_t) send(new_socket, args.data(), args.size(), 0) != args.size()) {
+    std::cout << "DEBUG: failed to send args" << std::endl;
+    return -1;
+  }
+
+  for (size_t i = 0; i < payload.size();) {
+    size_t chunk_size = MIN(1024ul, payload.size() - i);
+    const char* data_ptr = payload.data() + i;
     ssize_t bytes_sent = send(new_socket, data_ptr, chunk_size, 0);
 #ifdef SOCKETLIB_VERBOSE
     std::cout << "DEBUG: sent " << bytes_sent << " bytes" << std::endl;
@@ -205,5 +249,6 @@ int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const 
       return -1;
     }
   }
+  // fcntl(new_socket, F_SETFL, O_NONBLOCK);
   return 0;
 }

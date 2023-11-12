@@ -3,7 +3,7 @@ CFLAGS := -Wall -shared -fPIC
 
 SRC_DIR := .
 LIB_DIR := ${RISCV}/lib
-INC_DIR := ${RISCV}/include
+INC_DIR := ${RISCV}/include/socketlib
 
 SRC_FILES := $(wildcard $(SRC_DIR)/*.cc)
 HEADERS := $(wildcard $(SRC_DIR)/*.h)
@@ -31,3 +31,9 @@ rv64: $(SRC_FILES)
 	ar rvs libsocketlib.a libsocketlib.o
 	mkdir -p $(LIB_DIR)/rv64
 	cp libsocketlib.a $(LIB_DIR)/rv64/
+
+rv32: $(SRC_FILES)
+	riscv32-unknown-linux-gnu-g++ -Wall -static -c -o libsocketlib.o $^
+	ar rvs libsocketlib.a libsocketlib.o
+	mkdir -p $(LIB_DIR)/rv32
+	cp libsocketlib.a $(LIB_DIR)/rv32/
