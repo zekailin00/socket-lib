@@ -15,9 +15,35 @@
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+uint64_t socket_cycles = 0;
+
+
+#ifndef RISCV_COMPILATION
+
+#define CYCLES_START() 
+#define CYCLES_END() 
+
+#else
+
+inline static uint64_t sock_read_cycles() {
+  uint64_t cycles = 0;
+  asm volatile ("rdcycle %0" : "=r" (cycles));
+  return cycles;
+}
+
+#define CYCLES_START() \
+  uint64_t ent_cycles = sock_read_cycles();
+
+#define CYCLES_END() \
+  socket_cycles = socket_cycles + (sock_read_cycles() - ent_cycles); \
+  printf("[SocketLib] current cycle count: %llu at %d\n", socket_cycles, __LINE__);
+
+#endif
+
 int server_socket, new_socket;
 
 void init_server(const uint32_t port) {
+  CYCLES_START()
   struct sockaddr_in server_addr;
   struct sockaddr_storage server_storage;
   socklen_t addr_size;
@@ -44,11 +70,16 @@ void init_server(const uint32_t port) {
   while ((new_socket = accept(server_socket, (struct sockaddr *) &server_storage, &addr_size)) == -1) {}
   std::cout << "Connection accepted" << std::endl;
   // TODO: re-accept once client dropped
+  CYCLES_END()
 }
 
 void init_server_file(const char *socket_path) {
+  CYCLES_START()
   struct sockaddr_un addr;
   server_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+  printf("pass1\n");
+
+
   if (server_socket == -1) {
       perror("socket");
       exit(EXIT_FAILURE);
@@ -57,11 +88,17 @@ void init_server_file(const char *socket_path) {
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+  printf("pass2\n");
+
+
   if (bind(server_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       perror("bind");
       close(server_socket);
       exit(EXIT_FAILURE);
   }
+
+  printf("pass3\n");
+
   if (listen(server_socket, 5) == -1) {
       perror("listen");
       close(server_socket);
@@ -71,14 +108,17 @@ void init_server_file(const char *socket_path) {
   // fcntl(server_socket, F_SETFL, O_NONBLOCK);
 
   while ((new_socket = accept(server_socket, NULL, NULL)) == -1) {
+      printf("pass4\n");
       perror("accept");
       close(server_socket);
       exit(EXIT_FAILURE);
   }
+  printf("pass5\n");
   uint8_t endpoint_req;
-  recv(new_socket, &endpoint_req, 1, 0);
-  // fcntl(new_socket, F_SETFL, O_NONBLOCK);
+  // recv(new_socket, &endpoint_req, 1, 0);
+  fcntl(new_socket, F_SETFL, O_NONBLOCK);
   std::cout << "Connection accepted" << std::endl;
+  CYCLES_END()
 }
 
 void init_client(const uint32_t port) {
@@ -86,6 +126,7 @@ void init_client(const uint32_t port) {
 }
 
 void init_client(const uint32_t port, const endpoint_id_t endpoint_id) {
+  CYCLES_START()
   struct sockaddr_in server_addr;
   new_socket = socket(PF_INET, SOCK_STREAM, 0);
   server_addr.sin_family = AF_INET;
@@ -97,13 +138,16 @@ void init_client(const uint32_t port, const endpoint_id_t endpoint_id) {
     if ((endpoint_id != NOSERV) && (send(new_socket, &endpoint_id, sizeof(endpoint_id_t), 0) < 0)) {
       close(new_socket);
       std::cerr << "Failed to register endpoint ID." << std::endl;
+      CYCLES_END()
       exit(1);
     }
     // fcntl(new_socket, F_SETFL, O_NONBLOCK);
   } else {
     std::cerr << "Failed to connect." << std::endl;
+    CYCLES_END()
     exit(1);
   }
+  CYCLES_END()
 }
 
 void init_client_file(const char *socket_path) {
@@ -111,6 +155,7 @@ void init_client_file(const char *socket_path) {
 }
 
 void init_client_file(const char *socket_path, const endpoint_id_t endpoint_id) {
+  CYCLES_START()
   struct sockaddr_un addr;
   new_socket = socket(AF_UNIX, SOCK_STREAM, 0);
   if (new_socket == -1) {
@@ -132,6 +177,7 @@ void init_client_file(const char *socket_path, const endpoint_id_t endpoint_id) 
     std::cerr << "Failed to connect." << std::endl;
     exit(1);
   }
+  CYCLES_END()
 }
 
 std::deque<message_packet_t> received_packets;
@@ -177,6 +223,7 @@ void fetch_packets() {
 }
 
 int socket_receive(const func_id_t func_id, const bool blocking, std::vector<char> &dest_buf) {
+  CYCLES_START()
   // check for qualifying messages
   // if not found, fetch from socket
   // if blocking, fetch & check in a loop
@@ -215,10 +262,12 @@ int socket_receive(const func_id_t func_id, const bool blocking, std::vector<cha
       }
     }
   }
+  CYCLES_END()
   return (int) src_id;
 }
 
 int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const std::vector<char> &args, const std::vector<char> &payload) {
+  CYCLES_START()
   message_header_t header;
   header.size = sizeof(message_header_t) + args.size() + payload.size();
   header.src_id = NOSERV; // will be overriden by server
@@ -228,11 +277,13 @@ int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const 
   // fcntl(new_socket, F_SETFL, 0);
   if ((size_t) send(new_socket, &header, sizeof(header), 0) != sizeof(header)) {
     std::cout << "DEBUG: failed to send header" << std::endl;
+    CYCLES_END()
     return -1;
   }
 
   if ((size_t) send(new_socket, args.data(), args.size(), 0) != args.size()) {
     std::cout << "DEBUG: failed to send args" << std::endl;
+    CYCLES_END()
     return -1;
   }
 
@@ -246,9 +297,11 @@ int socket_send(const endpoint_id_t endpoint_id, const func_id_t func_id, const 
     i += bytes_sent;
     if (bytes_sent == -1) {
       std::cout << "DEBUG: failed to send everything" << std::endl;
+      CYCLES_END()
       return -1;
     }
   }
   // fcntl(new_socket, F_SETFL, O_NONBLOCK);
+  CYCLES_END()
   return 0;
 }
